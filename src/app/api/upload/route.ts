@@ -8,6 +8,7 @@ import { getTemporalClient, TASK_QUEUE_NAME } from "@/libs/temporal";
 import { getFileExtension } from "@/libs/files";
 import { uploadToS3 } from "@/libs/aws";
 import db from "@/libs/db";
+import { FileType } from "@prisma/client";
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
             file_size: file.size,
             is_uploaded: true,
             is_binary_file: false,
+            file_type: FileType.MARKDOWN,
             uploaded_at: new Date(),
           },
         });
