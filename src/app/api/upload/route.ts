@@ -23,7 +23,6 @@ export async function POST(request: NextRequest) {
     }
 
     const fileExtension = getFileExtension(file.name);
-    const newFileName = `${uuidv4()}.${fileExtension}`;
 
     try {
       // Step 1: create file details in db
@@ -37,41 +36,54 @@ export async function POST(request: NextRequest) {
         // for text files, for binary use Buffer
         const content = await file.text();
 
-        const uploadResult = await uploadToS3(newFileName, content);
-
-        await db.userFile.create({
+        // 1. create new record in db
+        const fileRecord = await db.userFile.create({
           data: {
             file_name: file.name,
             file_size: file.size,
-            is_uploaded: true,
+            is_uploaded: false,
             is_binary_file: false,
             file_type: FileType.MARKDOWN,
             uploaded_at: new Date(),
+            file_extension: fileExtension,
+          },
+        });
+
+        const newFileName = `${fileRecord.public_id}.${fileExtension}`;
+        const uploadResult = await uploadToS3(newFileName, content);
+
+        await db.userFile.update({
+          where: {
+            id: fileRecord.id,
+          },
+          data: {
+            is_uploaded: true,
           },
         });
 
         logger.info(`File uploaded to S3: ${newFileName}`);
 
         logger.info(`Started temporal workflow`);
-        const embeddingWorkflowId = `file-${nanoid()}`;
+        const embeddingWorkflowId = `file-${fileRecord.public_id}`;
         const client = getTemporalClient();
 
-        // const embeddingsHandle = await client.workflow.start(
-        //   Workflow.RUN_FILE_EMBEDDINGS,
-        //   {
-        //     taskQueue: TASK_QUEUE_NAME,
-        //     workflowId: embeddingWorkflowId,
-        //     args: [
-        //       {
-        //         ...fileRecord,
-        //       },
-        //     ],
-        //   }
-        // );
+        const embeddingsHandle = await client.workflow.start(
+          Workflow.RUN_FILE_EMBEDDINGS, // string! (runFileEmbeddings)
+          {
+            taskQueue: TASK_QUEUE_NAME,
+            workflowId: embeddingWorkflowId,
+            args: [
+              // workflow payload
+              {
+                ...fileRecord,
+              },
+            ],
+          }
+        );
 
-        // logger.info("embeddingsHandle: %j", embeddingsHandle, 2);
+        logger.info("embeddingsHandle: %j", embeddingsHandle, 2);
       } catch (err) {
-        logger.error({ err }, `Error uploading file to S3: ${newFileName}`);
+        logger.error({ err }, `Error uploading file to S3`);
 
         return NextResponse.json({ status: "Upload error" }, { status: 500 });
       }
