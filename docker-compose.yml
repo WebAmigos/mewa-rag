@@ -22,7 +22,7 @@ services:
 
   qdrant:
     image: qdrant/qdrant
-    container_name: ragen-qdrant
+    container_name: mewa-qdrant
     ports:
       - 6333:6333
     volumes:

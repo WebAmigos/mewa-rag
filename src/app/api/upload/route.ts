@@ -6,6 +6,8 @@ import { Workflow } from "@/app/contracts/Workflows";
 import { logger } from "@/libs/logger";
 import { getTemporalClient, TASK_QUEUE_NAME } from "@/libs/temporal";
 import { getFileExtension } from "@/libs/files";
+import { uploadToS3 } from "@/libs/aws";
+import db from "@/libs/db";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,11 +21,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const fileExtension = getFileExtension(file.name);
+    const newFileName = `${uuidv4()}.${fileExtension}`;
+
     try {
-      const fileExtension = getFileExtension(file.name);
-
-      console.log({ fileExtension });
-
       // Step 1: create file details in db
       // const fileRecord = await createFileDetailsInDB({});
 
@@ -31,30 +32,23 @@ export async function POST(request: NextRequest) {
       try {
         // this may be breaking change - files before had uuid as name
         // but there wasn't a logic which used files, so it should still work
-        // const uploadResult = await uploadToS3(
-        //   `${fileRecord.public_id}.${fileExtension}`,
-        //   parsedFile.content as Buffer
-        // );
 
-        // await db.userFile.update({
-        //   where: {
-        //     id: fileRecord.id,
-        //     organization_id: orgId,
-        //   },
-        //   data: {
-        //     is_uploaded: true,
-        //     uploaded_at: new Date(),
-        //   },
-        // });
+        // for text files, for binary use Buffer
+        const content = await file.text();
 
-        // processedFiles.push({
-        //   fileName: parsedFile.fileName,
-        //   fileSize: file.size,
-        //   uniqueFileId,
-        //   content: parsedFile.content,
-        // });
+        const uploadResult = await uploadToS3(newFileName, content);
 
-        // logger.info(`File uploaded to S3: ${parsedFile.fileName}`);
+        await db.userFile.create({
+          data: {
+            file_name: file.name,
+            file_size: file.size,
+            is_uploaded: true,
+            is_binary_file: false,
+            uploaded_at: new Date(),
+          },
+        });
+
+        logger.info(`File uploaded to S3: ${newFileName}`);
 
         logger.info(`Started temporal workflow`);
         const embeddingWorkflowId = `file-${nanoid()}`;
@@ -75,10 +69,7 @@ export async function POST(request: NextRequest) {
 
         // logger.info("embeddingsHandle: %j", embeddingsHandle, 2);
       } catch (err) {
-        logger.error(
-          { err }
-          // `Error uploading file to S3: ${parsedFile.fileName}`
-        );
+        logger.error({ err }, `Error uploading file to S3: ${newFileName}`);
 
         return NextResponse.json({ status: "Upload error" }, { status: 500 });
       }
